@@ -2,6 +2,7 @@ GEM
   remote: https://rubygems.org/
   specs:
     racc (1.4.14)
+    rake (12.3.2)
     rexical (1.0.5)
 
 PLATFORMS
@@ -9,6 +10,7 @@ PLATFORMS
 
 DEPENDENCIES
   racc
+  rake
   rexical
 
 BUNDLED WITH

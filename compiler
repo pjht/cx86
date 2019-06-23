@@ -1,0 +1,196 @@
+#! /usr/bin/env ruby
+`rake`
+require "./parser.rb"
+$indx_map=-8
+$var_map={}
+$tab_level=-1
+def generate_expr(expression)
+  $tab_level+=1
+  $tab_level.times do
+    print "-"
+  end
+  code=""
+  p expression
+  case expression[:type]
+  when :number
+    code+="mov rax,#{expression[:value]}\n"
+  when :neg
+    code+=generate_expr(expression[:expr])
+    code+="neg rax\n"
+  when :comp
+    code+=generate_expr(expression[:expr])
+    code+="not rax\n"
+  when :lneg
+    code+=generate_expr(expression[:expr])
+    code+="cmp rax,0\n"
+    code+="mov rax,0\n"
+    code+="sete al\n"
+  when :var
+    code+="mov rax,[rbp#{$var_map[expression[:name]][1]}]\n"
+  when :assign
+    code+=generate_expr(expression[:expr])
+    code+="mov [rbp#{$var_map[expression[:name]][1]}],rax\n"
+  when :comma
+    code+=generate_expr(expression[:expr1])
+    code+=generate_expr(expression[:expr2])
+  when :seteq
+    expression[:type]=expression[:op]
+    name=expression[:name]
+    expression.delete :op
+    expression.delete :name
+    code+=generate_expr({:type=>:assign,:name=>name,:expr=>expression})
+  else
+    code+=generate_expr(expression[:expr1])
+    code+="push rax\n"
+    code+=generate_expr(expression[:expr2])
+    code+="pop rcx\n"
+    case expression[:type]
+    when :plus
+      code+="add rax,rcx\n"
+    when :minus
+      code+="push rax\n"
+      code+="push rcx\n"
+      code+="pop rax\n"
+      code+="pop rcx\n"
+      code+="sub rax,rcx\n"
+    when :mul
+      code+="imul rax,rcx\n"
+    when :div
+      code+="push rax\n"
+      code+="push rcx\n"
+      code+="pop rax\n"
+      code+="pop rcx\n"
+      code+="mov edx,0\n"
+      code+="idiv ecx\n"
+    when :mod
+      code+="push rax\n"
+      code+="push rcx\n"
+      code+="pop rax\n"
+      code+="pop rcx\n"
+      code+="mov edx,0\n"
+      code+="idiv ecx\n"
+      code+="mov eax,edx\n"
+    when :eq
+      code+="cmp rax,rcx\n"
+      code+="mov rax,0\n"
+      code+="sete al\n"
+    when :ne
+      code+="cmp rax,rcx\n"
+      code+="mov rax,0\n"
+      code+="setne al\n"
+    when :ge
+      code+="cmp rax,rcx\n"
+      code+="mov rax,0\n"
+      code+="setge al\n"
+    when :le
+      code+="cmp rax,rcx\n"
+      code+="mov rax,0\n"
+      code+="setle al\n"
+    when :gt
+      code+="cmp rax,rcx\n"
+      code+="mov rax,0\n"
+      code+="setgt al\n"
+    when :lt
+      code+="cmp rax,rcx\n"
+      code+="mov rax,0\n"
+      code+="setlt al\n"
+    when :lor
+      code+="or eax,ecx\n"
+      code+="mov eax,0\n"
+      code+="setne al\n"
+    when :land
+      code+="cmp ecx,0\n"
+      code+="setne cl\n"
+      code+="cmp eax,0\n"
+      code+="mov eax,0\n"
+      code+="setne al\n"
+      code+="and al,cl\n"
+    when :shl
+      code+="push rax\n"
+      code+="push rcx\n"
+      code+="pop rax\n"
+      code+="pop rcx\n"
+      code+="shl rax,cl\n"
+    when :shr
+      code+="push rax\n"
+      code+="push rcx\n"
+      code+="pop rax\n"
+      code+="pop rcx\n"
+      code+="shr rax,cl\n"
+    when :and
+      code+="and rax,rcx\n"
+    when :or
+      code+="or rax,rcx\n"
+    when :xor
+      code+="xor rax,rcx\n"
+    end
+  end
+  $tab_level-=1
+  return code
+end
+def generate_statement(statement)
+  $tab_level+=1
+  $tab_level.times do
+    print "-"
+  end
+  p statement
+  code=""
+  case statement[:type]
+  when :return
+    code+=generate_expr(statement[:expr])
+    code+="mov rsp,rbp\n"
+    code+="pop rbp\n"
+    code+="ret\n"
+  when :vardecl
+    code+="push 0\n"
+    $var_map[statement[:varname]]=[statement[:vartype],$indx]
+    $indx-=8
+  when :vardeclinit
+    code+=generate_expr(statement[:init])
+    code+="push rax\n"
+    $var_map[statement[:varname]]=[statement[:vartype],$indx]
+    $indx-=8
+  when :expr
+    code+=generate_expr(statement[:expr])
+  end
+  $tab_level-=1;
+  return code
+end
+def generate_block(block)
+  code=""
+  for statement in block
+    code+=generate_statement(statement)
+  end
+  return code
+end
+def generate_func(func)
+  code=""
+  $indx=-8
+  $var_map={}
+  code+=".globl _#{func[:name]}\n"
+  code+="_#{func[:name]}:\n"
+  code+="push rbp\n"
+  code+="mov rbp,rsp\n"
+  code+=generate_block(func[:code])
+  code+="mov rax,0\n"
+  code+="mov rsp,rbp\n"
+  code+="pop rbp\n"
+  code+="ret\n"
+  return code
+end
+def generate(ast)
+  code=""
+  for func in ast
+    code+=generate_func(func)
+  end
+  return code
+end
+program=File.read("main.c")
+p CX86.new.tokenize(program)
+ast=CX86.new.parse(program)
+code=generate(ast)
+#puts code
+f=File.open("out.asm","w")
+f.puts code
+f.close
+puts `gcc -masm=intel -o out out.asm;./out;echo $?`
